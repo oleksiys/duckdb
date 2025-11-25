@@ -1021,6 +1021,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("parquet_metadata_cache",
 	                          "Cache Parquet metadata - useful when reading the same files multiple times",
 	                          LogicalType::BOOLEAN, Value(false));
+	config.AddExtensionOption("parquet_metadata_cache_size",
+	                          "Maximum memory size (in bytes) for the Parquet metadata cache",
+	                          LogicalType::UBIGINT, Value::UBIGINT(256ULL * 1024ULL * 1024ULL));
 	config.AddExtensionOption(
 	    "enable_geoparquet_conversion",
 	    "Attempt to decode/encode geometry data in/as GeoParquet files if the spatial extension is present.",

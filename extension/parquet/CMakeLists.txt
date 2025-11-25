@@ -17,6 +17,7 @@ set(PARQUET_EXTENSION_FILES
     parquet_crypto.cpp
     parquet_extension.cpp
     parquet_file_metadata_cache.cpp
+    parquet_metadata_cache.cpp
     parquet_float16.cpp
     parquet_multi_file_info.cpp
     parquet_metadata.cpp

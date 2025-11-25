@@ -9,6 +9,7 @@
 #include "reader/list_column_reader.hpp"
 #include "parquet_crypto.hpp"
 #include "parquet_file_metadata_cache.hpp"
+#include "parquet_metadata_cache.hpp"
 #include "parquet_statistics.hpp"
 #include "parquet_timestamp.hpp"
 #include "mbedtls_wrapper.hpp"
@@ -170,8 +171,9 @@ LoadMetadata(ClientContext &context, Allocator &allocator, CachingFileHandle &fi
 
 	// Try to read the GeoParquet metadata (if present)
 	auto geo_metadata = GeoParquetFileMetadata::TryRead(*metadata, context);
-	return make_shared_ptr<ParquetFileMetadataCache>(std::move(metadata), file_handle, std::move(geo_metadata),
-	                                                 footer_len);
+	// Use direct construction to avoid issues with reference parameters
+	return shared_ptr<ParquetFileMetadataCache>(
+	    new ParquetFileMetadataCache(std::move(metadata), file_handle, std::move(geo_metadata), footer_len));
 }
 
 LogicalType ParquetReader::DeriveLogicalType(const SchemaElement &s_ele, ParquetColumnSchema &schema) const {
@@ -878,11 +880,16 @@ ParquetReader::ParquetReader(ClientContext &context_p, OpenFileInfo file_p, Parq
 			metadata = LoadMetadata(context_p, allocator, *file_handle, parquet_options.encryption_config,
 			                        *encryption_util, footer_size);
 		} else {
-			metadata = ObjectCache::GetObjectCache(context_p).Get<ParquetFileMetadataCache>(file.path);
+			auto cache = ParquetMetadataCache::Get(context_p);
+			if (cache) {
+				metadata = cache->Get(file.path);
+			}
 			if (!metadata || !metadata->IsValid(*file_handle)) {
 				metadata = LoadMetadata(context_p, allocator, *file_handle, parquet_options.encryption_config,
 				                        *encryption_util, footer_size);
-				ObjectCache::GetObjectCache(context_p).Put(file.path, metadata);
+				if (cache) {
+					cache->Put(file.path, metadata);
+				}
 			}
 		}
 	} else {
@@ -899,7 +906,11 @@ bool ParquetReader::MetadataCacheEnabled(ClientContext &context) {
 
 shared_ptr<ParquetFileMetadataCache> ParquetReader::GetMetadataCacheEntry(ClientContext &context,
                                                                           const OpenFileInfo &file) {
-	return ObjectCache::GetObjectCache(context).Get<ParquetFileMetadataCache>(file.path);
+	auto cache = ParquetMetadataCache::Get(context);
+	if (!cache) {
+		return nullptr;
+	}
+	return cache->Get(file.path);
 }
 
 ParquetUnionData::~ParquetUnionData() {
