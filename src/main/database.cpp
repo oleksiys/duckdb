@@ -266,7 +266,7 @@ static duckdb_ext_api_v1 CreateAPIv1Wrapper() {
 	return CreateAPIv1();
 }
 
-void DatabaseInstance::Initialize(const char *database_path, DBConfig *user_config) {
+void DatabaseInstance::Initialize(DuckDB &db, const char *database_path, DBConfig *user_config) {
 	DBConfig default_config;
 	DBConfig *config_ptr = &default_config;
 	if (user_config) {
@@ -316,6 +316,13 @@ void DatabaseInstance::Initialize(const char *database_path, DBConfig *user_conf
 		}
 	}
 
+	// Load statically linked extensions BEFORE processing extension settings
+	// This ensures that config options for statically linked extensions are recognized
+	// and don't require autoloading (which fails for static extensions)
+	if (config.options.load_extensions) {
+		ExtensionHelper::LoadAllExtensions(db);
+	}
+
 	LoadExtensionSettings();
 
 	if (!db_manager->HasDefaultDatabase()) {
@@ -328,10 +335,14 @@ void DatabaseInstance::Initialize(const char *database_path, DBConfig *user_conf
 }
 
 DuckDB::DuckDB(const char *path, DBConfig *new_config) : instance(make_shared_ptr<DatabaseInstance>()) {
-	instance->Initialize(path, new_config);
-	if (instance->config.options.load_extensions) {
-		ExtensionHelper::LoadAllExtensions(*this);
-	}
+	instance->Initialize(*this, path, new_config);
+	// Note: ExtensionHelper::LoadAllExtensions() is now called within Initialize()
+	// before processing extension settings, so statically linked extensions are available
+	// when their config options are being set
+	// if (instance->config.options.load_extensions) {
+	// 	ExtensionHelper::LoadAllExtensions(*this);
+	// }
+
 	instance->db_manager->FinalizeStartup();
 }
 

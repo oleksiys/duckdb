@@ -27,6 +27,7 @@ class ExtensionManager;
 class FileSystem;
 class TaskScheduler;
 class ObjectCache;
+class DuckDB;
 struct AttachInfo;
 struct AttachOptions;
 class DatabaseFileSystem;
@@ -75,7 +76,7 @@ public:
 	                                                    AttachOptions &options);
 
 private:
-	void Initialize(const char *path, DBConfig *config);
+	void Initialize(DuckDB &db, const char *path, DBConfig *config);
 	void LoadExtensionSettings();
 	void CreateMainDatabase();
 
