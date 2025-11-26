@@ -131,11 +131,11 @@ TEST_CASE("Test ParquetMetadataCache configuration", "[api][parquet]") {
 		Connection con(db);
 		REQUIRE_NO_FAIL(con.Query("LOAD parquet"));
 
-		// Check default value (256MB)
+		// Check default value (1GB)
 		auto result = con.Query("SELECT current_setting('parquet_metadata_cache_size')");
 		REQUIRE(result->RowCount() == 1);
 		auto value = result->GetValue(0, 0);
-		REQUIRE(value.GetValue<uint64_t>() == 256ULL * 1024ULL * 1024ULL);
+		REQUIRE(value.GetValue<uint64_t>() == 1024ULL * 1024ULL * 1024ULL);
 	}
 
 	SECTION("Custom cache size at startup") {
@@ -266,8 +266,8 @@ TEST_CASE("Test ParquetMetadataCache Stats Function", "[api][parquet]") {
 		// cache_enabled should be true
 		REQUIRE(result->GetValue(0, 0).GetValue<bool>() == true);
 
-		// max_memory_bytes should be default 256MB
-		REQUIRE(result->GetValue(1, 0).GetValue<uint64_t>() == 256ULL * 1024ULL * 1024ULL);
+		// max_memory_bytes should be default 1GB
+		REQUIRE(result->GetValue(1, 0).GetValue<uint64_t>() == 1024ULL * 1024ULL * 1024ULL);
 
 		// current_memory_bytes should be 0 (empty cache)
 		REQUIRE(result->GetValue(2, 0).GetValue<uint64_t>() == 0);

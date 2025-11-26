@@ -7,7 +7,9 @@
 namespace duckdb {
 
 ParquetMetadataCache::ParquetMetadataCache(idx_t max_memory_bytes)
-    : current_memory(0), max_memory(max_memory_bytes), total_hits(0), total_misses(0), total_evictions(0) {
+    : current_memory(0), max_memory(0), total_hits(0), total_misses(0), total_evictions(0) {
+	// Explicitly store max_memory after atomic initialization
+	max_memory.store(max_memory_bytes, std::memory_order_relaxed);
 }
 
 shared_ptr<ParquetMetadataCache> ParquetMetadataCache::Get(DatabaseInstance &db) {
@@ -26,7 +28,7 @@ shared_ptr<ParquetMetadataCache> ParquetMetadataCache::Get(DatabaseInstance &db)
 	Value result;
 	auto lookup_result = db.TryGetCurrentSetting("parquet_metadata_cache_size", result);
 	if (lookup_result) {
-		max_size = UBigIntValue::Get(result);
+		max_size = result.GetValue<uint64_t>();
 	}
 
 	// Use GetOrCreate for thread-safe lazy initialization
