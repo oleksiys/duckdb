@@ -1052,6 +1052,7 @@ static constexpr ExtensionEntry EXTENSION_SETTINGS[] = {
     {"mysql_time_as_time", "mysql_scanner"},
     {"mysql_tinyint1_as_boolean", "mysql_scanner"},
     {"parquet_metadata_cache", "parquet"},
+    {"parquet_metadata_cache_size", "parquet"},
     {"pg_array_as_varchar", "postgres_scanner"},
     {"pg_connection_cache", "postgres_scanner"},
     {"pg_connection_limit", "postgres_scanner"},
