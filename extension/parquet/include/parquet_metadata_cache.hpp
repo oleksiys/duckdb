@@ -39,7 +39,6 @@ public:
 public:
 	//! Get the ParquetMetadataCache from the database's ObjectCache
 	static shared_ptr<ParquetMetadataCache> Get(DatabaseInstance &db);
-	static shared_ptr<ParquetMetadataCache> Get(ClientContext &context);
 
 	//! Get a cached metadata entry by file path
 	shared_ptr<ParquetFileMetadataCache> Get(const string &key);
@@ -62,11 +61,6 @@ public:
 	//! Set maximum memory limit
 	void SetMaxMemory(idx_t max_memory_bytes);
 
-	//! Enable or disable the cache
-	void SetEnabled(bool enabled);
-
-	//! Check if the cache is enabled
-	bool IsEnabled() const;
 
 	//! Get cache statistics
 	struct CacheStats {
@@ -106,8 +100,6 @@ private:
 	//! Maximum memory limit (in bytes)
 	atomic<idx_t> max_memory;
 
-	//! Whether the cache is enabled
-	atomic<bool> enabled;
 
 	//! Cache statistics
 	atomic<idx_t> total_hits;

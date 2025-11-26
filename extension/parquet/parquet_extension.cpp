@@ -8,6 +8,7 @@
 #include "duckdb/planner/operator/logical_projection.hpp"
 #include "duckdb/planner/query_node/bound_select_node.hpp"
 #include "geo_parquet.hpp"
+#include "parquet_cache_stats.hpp"
 #include "parquet_crypto.hpp"
 #include "parquet_metadata.hpp"
 #include "parquet_reader.hpp"
@@ -978,6 +979,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// parquet_bloom_probe
 	ParquetBloomProbeFunction bloom_probe_fun;
 	loader.RegisterFunction(MultiFileReader::CreateFunctionSet(bloom_probe_fun));
+
+	// parquet_cache_stats
+	RegisterParquetCacheStatsFunction(loader);
 
 	CopyFunction function("parquet");
 	function.copy_to_select = ParquetWriteSelect;

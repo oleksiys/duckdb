@@ -171,9 +171,8 @@ LoadMetadata(ClientContext &context, Allocator &allocator, CachingFileHandle &fi
 
 	// Try to read the GeoParquet metadata (if present)
 	auto geo_metadata = GeoParquetFileMetadata::TryRead(*metadata, context);
-	// Use direct construction to avoid issues with reference parameters
-	return shared_ptr<ParquetFileMetadataCache>(
-	    new ParquetFileMetadataCache(std::move(metadata), file_handle, std::move(geo_metadata), footer_len));
+	return make_shared_ptr<ParquetFileMetadataCache>(std::move(metadata), file_handle, std::move(geo_metadata),
+	                                                 footer_len);
 }
 
 LogicalType ParquetReader::DeriveLogicalType(const SchemaElement &s_ele, ParquetColumnSchema &schema) const {
@@ -880,16 +879,12 @@ ParquetReader::ParquetReader(ClientContext &context_p, OpenFileInfo file_p, Parq
 			metadata = LoadMetadata(context_p, allocator, *file_handle, parquet_options.encryption_config,
 			                        *encryption_util, footer_size);
 		} else {
-			auto cache = ParquetMetadataCache::Get(context_p);
-			if (cache) {
-				metadata = cache->Get(file.path);
-			}
+			auto cache = ParquetMetadataCache::Get(DatabaseInstance::GetDatabase(context_p));
+			metadata = cache->Get(file.path);
 			if (!metadata || !metadata->IsValid(*file_handle)) {
 				metadata = LoadMetadata(context_p, allocator, *file_handle, parquet_options.encryption_config,
 				                        *encryption_util, footer_size);
-				if (cache) {
-					cache->Put(file.path, metadata);
-				}
+			    cache->Put(file.path, metadata);
 			}
 		}
 	} else {
@@ -906,10 +901,7 @@ bool ParquetReader::MetadataCacheEnabled(ClientContext &context) {
 
 shared_ptr<ParquetFileMetadataCache> ParquetReader::GetMetadataCacheEntry(ClientContext &context,
                                                                           const OpenFileInfo &file) {
-	auto cache = ParquetMetadataCache::Get(context);
-	if (!cache) {
-		return nullptr;
-	}
+	auto cache = ParquetMetadataCache::Get(DatabaseInstance::GetDatabase(context));
 	return cache->Get(file.path);
 }
 

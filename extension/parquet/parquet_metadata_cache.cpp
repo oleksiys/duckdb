@@ -7,51 +7,34 @@
 namespace duckdb {
 
 ParquetMetadataCache::ParquetMetadataCache(idx_t max_memory_bytes)
-    : current_memory(0), max_memory(max_memory_bytes), enabled(true), total_hits(0), total_misses(0),
-      total_evictions(0) {
+    : current_memory(0), max_memory(max_memory_bytes), total_hits(0), total_misses(0), total_evictions(0) {
 }
 
 shared_ptr<ParquetMetadataCache> ParquetMetadataCache::Get(DatabaseInstance &db) {
 	auto &object_cache = db.GetObjectCache();
 
-	// Try to get existing cache from ObjectCache
+	// First, try to get existing cache (fast path - no lock contention for repeated access)
 	auto cache = object_cache.Get<ParquetMetadataCache>(ObjectType());
 	if (cache) {
 		return cache;
 	}
 
-	// Lazy initialization - create the cache on first access
-	// Read configuration from database config
-	idx_t max_size = 256ULL * 1024ULL * 1024ULL; // Default 256MB
-	bool cache_enabled = false; // Default disabled
+	// Cache doesn't exist - need to create it
+	// Determine cache size from GLOBAL database-level setting
+	idx_t max_size = 1024ULL * 1024ULL * 1024ULL; // Default 1GB
 
-	// Try to get configuration values
 	Value result;
 	auto lookup_result = db.TryGetCurrentSetting("parquet_metadata_cache_size", result);
 	if (lookup_result) {
 		max_size = UBigIntValue::Get(result);
 	}
-	lookup_result = db.TryGetCurrentSetting("parquet_metadata_cache", result);
-	if (lookup_result) {
-		cache_enabled = BooleanValue::Get(result);
-	}
 
-	// Create and register new cache
-	auto new_cache = make_shared_ptr<ParquetMetadataCache>(max_size);
-	new_cache->SetEnabled(cache_enabled);
-	object_cache.Put(ObjectType(), new_cache);
-
-	return new_cache;
-}
-
-shared_ptr<ParquetMetadataCache> ParquetMetadataCache::Get(ClientContext &context) {
-	return Get(DatabaseInstance::GetDatabase(context));
+	// Use GetOrCreate for thread-safe lazy initialization
+	// This atomically checks if the cache exists and creates it if not, all under a single lock
+	return object_cache.GetOrCreate<ParquetMetadataCache>(ObjectType(), max_size);
 }
 
 shared_ptr<ParquetFileMetadataCache> ParquetMetadataCache::Get(const string &key) {
-	if (!enabled.load()) {
-		return nullptr;
-	}
 
 	lock_guard<mutex> guard(lock);
 
@@ -68,9 +51,6 @@ shared_ptr<ParquetFileMetadataCache> ParquetMetadataCache::Get(const string &key
 }
 
 void ParquetMetadataCache::Put(const string &key, const shared_ptr<ParquetFileMetadataCache> &entry) {
-	if (!enabled.load()) {
-		return;
-	}
 
 	auto memory_size = entry->GetMemoryUsage();
 
@@ -128,17 +108,6 @@ void ParquetMetadataCache::SetMaxMemory(idx_t max_memory_bytes) {
 	EvictIfNeeded(0);
 }
 
-void ParquetMetadataCache::SetEnabled(bool enabled_p) {
-	enabled = enabled_p;
-	if (!enabled_p) {
-		// Clear cache when disabled
-		Clear();
-	}
-}
-
-bool ParquetMetadataCache::IsEnabled() const {
-	return enabled.load();
-}
 
 ParquetMetadataCache::CacheStats ParquetMetadataCache::GetStats() const {
 	lock_guard<mutex> guard(lock);

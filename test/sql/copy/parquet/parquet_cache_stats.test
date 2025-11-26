@@ -1,0 +1,117 @@
+# name: test/sql/copy/parquet/parquet_cache_stats.test
+# description: Test parquet_cache_stats() function
+# group: [parquet]
+
+require parquet
+
+# Test with cache disabled (default)
+query IIIIIIIII
+SELECT * FROM parquet_cache_stats();
+----
+false	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL
+
+# Enable cache and check initial state
+statement ok
+SET parquet_metadata_cache=true;
+
+query IIIIIIIII
+SELECT cache_enabled, max_memory_bytes, current_memory_bytes, entry_count, total_hits, total_misses, total_evictions FROM parquet_cache_stats();
+----
+true	268435456	0	0	0	0	0
+
+# Create a test file
+statement ok
+CREATE TABLE test_data AS SELECT i, i*2 as j FROM range(100) tbl(i);
+
+statement ok
+COPY test_data TO '__TEST_DIR__/cache_test1.parquet';
+
+# Read the file (should be a cache miss)
+query I
+SELECT COUNT(*) FROM '__TEST_DIR__/cache_test1.parquet';
+----
+100
+
+# Check stats after first read
+query III
+SELECT entry_count, total_hits, total_misses FROM parquet_cache_stats();
+----
+1	0	1
+
+# Read the same file again (should be a cache hit)
+query I
+SELECT SUM(i) FROM '__TEST_DIR__/cache_test1.parquet';
+----
+4950
+
+# Check stats after second read
+query III
+SELECT entry_count, total_hits, total_misses FROM parquet_cache_stats();
+----
+1	1	1
+
+# Read again (another hit)
+query I
+SELECT MAX(j) FROM '__TEST_DIR__/cache_test1.parquet';
+----
+198
+
+# Check stats - should have 2 hits now
+query IIII
+SELECT entry_count, total_hits, total_misses, CAST(hit_rate_pct AS INT) as hit_rate FROM parquet_cache_stats();
+----
+1	2	1	66
+
+# Create another file
+statement ok
+COPY (SELECT i FROM range(50) tbl(i)) TO '__TEST_DIR__/cache_test2.parquet';
+
+# Read the second file
+query I
+SELECT COUNT(*) FROM '__TEST_DIR__/cache_test2.parquet';
+----
+50
+
+# Check stats - should have 2 entries now
+query III
+SELECT entry_count, total_hits, total_misses FROM parquet_cache_stats();
+----
+2	2	2
+
+# Test memory usage is tracked
+query I
+SELECT current_memory_bytes > 0 FROM parquet_cache_stats();
+----
+true
+
+# Test memory percentage is calculated
+query I
+SELECT memory_usage_pct > 0.0 AND memory_usage_pct < 1.0 FROM parquet_cache_stats();
+----
+true
+
+# Test with custom cache size
+statement ok
+SET parquet_metadata_cache_size=1048576;
+
+query I
+SELECT max_memory_bytes FROM parquet_cache_stats();
+----
+1048576
+
+# Disable cache
+statement ok
+SET parquet_metadata_cache=false;
+
+# Stats should show cache disabled
+query I
+SELECT cache_enabled FROM parquet_cache_stats();
+----
+false
+
+# All stats should be NULL when disabled
+query I
+SELECT entry_count IS NULL FROM parquet_cache_stats();
+----
+true
+

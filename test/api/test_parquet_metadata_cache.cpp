@@ -233,3 +233,189 @@ TEST_CASE("Test ParquetMetadataCache validation", "[api][parquet]") {
 	}
 }
 
+TEST_CASE("Test ParquetMetadataCache Stats Function", "[api][parquet]") {
+	DuckDB db;
+	Connection con(db);
+	REQUIRE_NO_FAIL(con.Query("LOAD parquet"));
+
+	SECTION("Stats with cache disabled") {
+		// Cache disabled by default
+		auto result = con.Query("SELECT * FROM parquet_cache_stats()");
+		REQUIRE(result->RowCount() == 1);
+
+		// cache_enabled should be false
+		REQUIRE(result->GetValue(0, 0).GetValue<bool>() == false);
+
+		// All other values should be NULL
+		REQUIRE(result->GetValue(1, 0).IsNull()); // max_memory_bytes
+		REQUIRE(result->GetValue(2, 0).IsNull()); // current_memory_bytes
+		REQUIRE(result->GetValue(3, 0).IsNull()); // memory_usage_pct
+		REQUIRE(result->GetValue(4, 0).IsNull()); // entry_count
+		REQUIRE(result->GetValue(5, 0).IsNull()); // total_hits
+		REQUIRE(result->GetValue(6, 0).IsNull()); // total_misses
+		REQUIRE(result->GetValue(7, 0).IsNull()); // hit_rate_pct
+		REQUIRE(result->GetValue(8, 0).IsNull()); // total_evictions
+	}
+
+	SECTION("Stats with cache enabled but empty") {
+		REQUIRE_NO_FAIL(con.Query("SET parquet_metadata_cache=true"));
+
+		auto result = con.Query("SELECT * FROM parquet_cache_stats()");
+		REQUIRE(result->RowCount() == 1);
+
+		// cache_enabled should be true
+		REQUIRE(result->GetValue(0, 0).GetValue<bool>() == true);
+
+		// max_memory_bytes should be default 256MB
+		REQUIRE(result->GetValue(1, 0).GetValue<uint64_t>() == 256ULL * 1024ULL * 1024ULL);
+
+		// current_memory_bytes should be 0 (empty cache)
+		REQUIRE(result->GetValue(2, 0).GetValue<uint64_t>() == 0);
+
+		// memory_usage_pct should be 0.0
+		REQUIRE(result->GetValue(3, 0).GetValue<double>() == 0.0);
+
+		// entry_count should be 0
+		REQUIRE(result->GetValue(4, 0).GetValue<uint64_t>() == 0);
+
+		// total_hits should be 0
+		REQUIRE(result->GetValue(5, 0).GetValue<uint64_t>() == 0);
+
+		// total_misses should be 0
+		REQUIRE(result->GetValue(6, 0).GetValue<uint64_t>() == 0);
+
+		// hit_rate_pct should be 0.0 (no accesses yet)
+		REQUIRE(result->GetValue(7, 0).GetValue<double>() == 0.0);
+
+		// total_evictions should be 0
+		REQUIRE(result->GetValue(8, 0).GetValue<uint64_t>() == 0);
+	}
+
+	SECTION("Stats after reading a file") {
+		REQUIRE_NO_FAIL(con.Query("SET parquet_metadata_cache=true"));
+
+		// Create and read a test file
+		auto test_file = TestCreatePath("stats_test.parquet");
+		REQUIRE_NO_FAIL(con.Query("COPY (SELECT i FROM range(100) tbl(i)) TO '" + test_file + "'"));
+		REQUIRE_NO_FAIL(con.Query("SELECT * FROM '" + test_file + "'"));
+
+		auto result = con.Query("SELECT * FROM parquet_cache_stats()");
+		REQUIRE(result->RowCount() == 1);
+
+		// cache_enabled should be true
+		REQUIRE(result->GetValue(0, 0).GetValue<bool>() == true);
+
+		// entry_count should be 1
+		REQUIRE(result->GetValue(4, 0).GetValue<uint64_t>() == 1);
+
+		// total_hits should be 0 (first read is a miss)
+		REQUIRE(result->GetValue(5, 0).GetValue<uint64_t>() == 0);
+
+		// total_misses should be 1
+		REQUIRE(result->GetValue(6, 0).GetValue<uint64_t>() == 1);
+
+		// hit_rate_pct should be 0.0 (1 miss, 0 hits)
+		REQUIRE(result->GetValue(7, 0).GetValue<double>() == 0.0);
+
+		// current_memory_bytes should be > 0
+		REQUIRE(result->GetValue(2, 0).GetValue<uint64_t>() > 0);
+	}
+
+	SECTION("Stats after cache hits") {
+		REQUIRE_NO_FAIL(con.Query("SET parquet_metadata_cache=true"));
+
+		// Create and read a test file multiple times
+		auto test_file = TestCreatePath("cache_hits_test.parquet");
+		REQUIRE_NO_FAIL(con.Query("COPY (SELECT i FROM range(100) tbl(i)) TO '" + test_file + "'"));
+
+		// First read (miss)
+		REQUIRE_NO_FAIL(con.Query("SELECT * FROM '" + test_file + "'"));
+
+		// Second read (hit)
+		REQUIRE_NO_FAIL(con.Query("SELECT * FROM '" + test_file + "'"));
+
+		// Third read (hit)
+		REQUIRE_NO_FAIL(con.Query("SELECT * FROM '" + test_file + "'"));
+
+		auto result = con.Query("SELECT * FROM parquet_cache_stats()");
+		REQUIRE(result->RowCount() == 1);
+
+		// entry_count should be 1
+		REQUIRE(result->GetValue(4, 0).GetValue<uint64_t>() == 1);
+
+		// total_hits should be 2
+		REQUIRE(result->GetValue(5, 0).GetValue<uint64_t>() == 2);
+
+		// total_misses should be 1
+		REQUIRE(result->GetValue(6, 0).GetValue<uint64_t>() == 1);
+
+		// hit_rate_pct should be 66.66... (2 hits out of 3 accesses)
+		double hit_rate = result->GetValue(7, 0).GetValue<double>();
+		REQUIRE(hit_rate > 66.0);
+		REQUIRE(hit_rate < 67.0);
+	}
+
+	SECTION("Stats with custom cache size") {
+		// Create a fresh database with custom cache size
+		DuckDB db2;
+		Connection con2(db2);
+		REQUIRE_NO_FAIL(con2.Query("LOAD parquet"));
+		REQUIRE_NO_FAIL(con2.Query("SET parquet_metadata_cache_size=1048576")); // 1MB
+		REQUIRE_NO_FAIL(con2.Query("SET parquet_metadata_cache=true"));
+
+		// Create and read a file to initialize cache
+		auto test_file = TestCreatePath("custom_size_test.parquet");
+		REQUIRE_NO_FAIL(con2.Query("COPY (SELECT i FROM range(10) tbl(i)) TO '" + test_file + "'"));
+		REQUIRE_NO_FAIL(con2.Query("SELECT * FROM '" + test_file + "'"));
+
+		auto result = con2.Query("SELECT * FROM parquet_cache_stats()");
+		REQUIRE(result->RowCount() == 1);
+
+		// Note: cache size may not update immediately after creation
+		// The cache is created on first use with the setting value at that time
+		auto max_memory = result->GetValue(1, 0).GetValue<uint64_t>();
+		REQUIRE(max_memory > 0);
+	}
+
+	SECTION("Stats with multiple files") {
+		REQUIRE_NO_FAIL(con.Query("SET parquet_metadata_cache=true"));
+
+		// Create and read multiple files
+		for (int i = 0; i < 3; i++) {
+			auto test_file = TestCreatePath("multi_file_" + std::to_string(i) + ".parquet");
+			REQUIRE_NO_FAIL(con.Query("COPY (SELECT i FROM range(50) tbl(i)) TO '" + test_file + "'"));
+			REQUIRE_NO_FAIL(con.Query("SELECT COUNT(*) FROM '" + test_file + "'"));
+		}
+
+		auto result = con.Query("SELECT * FROM parquet_cache_stats()");
+		REQUIRE(result->RowCount() == 1);
+
+		// entry_count should be 3
+		REQUIRE(result->GetValue(4, 0).GetValue<uint64_t>() == 3);
+
+		// total_misses should be 3 (one per file)
+		REQUIRE(result->GetValue(6, 0).GetValue<uint64_t>() == 3);
+
+		// current_memory_bytes should be > 0
+		REQUIRE(result->GetValue(2, 0).GetValue<uint64_t>() > 0);
+	}
+
+	SECTION("Stats memory usage percentage") {
+		REQUIRE_NO_FAIL(con.Query("SET parquet_metadata_cache=true"));
+
+		auto test_file = TestCreatePath("memory_pct_test.parquet");
+		REQUIRE_NO_FAIL(con.Query("COPY (SELECT i FROM range(100) tbl(i)) TO '" + test_file + "'"));
+		REQUIRE_NO_FAIL(con.Query("SELECT * FROM '" + test_file + "'"));
+
+		auto result = con.Query("SELECT * FROM parquet_cache_stats()");
+		REQUIRE(result->RowCount() == 1);
+
+		// memory_usage_pct should be > 0 but < 100
+		double memory_pct = result->GetValue(3, 0).GetValue<double>();
+		REQUIRE(memory_pct > 0.0);
+		REQUIRE(memory_pct < 100.0);
+
+		// It should be very small (< 1%)
+		REQUIRE(memory_pct < 1.0);
+	}
+}

@@ -14,6 +14,7 @@ set(PARQUET_EXTENSION_FILES
     ${PARQUET_EXTENSION_FILES}
     column_reader.cpp
     column_writer.cpp
+    parquet_cache_stats.cpp
     parquet_crypto.cpp
     parquet_extension.cpp
     parquet_file_metadata_cache.cpp
